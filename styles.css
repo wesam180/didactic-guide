@@ -376,6 +376,11 @@ body {
     font-size: 1.5rem;
 }
 
+.history-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
 .history-list {
     display: flex;
     flex-direction: column;
@@ -595,6 +600,10 @@ body {
         flex-direction: column;
         gap: 1rem;
         text-align: center;
+    }
+    
+    .history-actions {
+        justify-content: center;
     }
     
     .manual-input {
