@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RunTracker - Your Running & Walking Companion</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1><i class="fas fa-running"></i> RunTracker</h1>
+                <nav class="nav-tabs">
+                    <button class="nav-tab active" data-tab="tracker">Tracker</button>
+                    <button class="nav-tab" data-tab="history">History</button>
+                    <button class="nav-tab" data-tab="stats">Stats</button>
+                </nav>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Tracker Tab -->
+            <section id="tracker-tab" class="tab-content active">
+                <div class="tracker-container">
+                    <!-- Activity Type Selection -->
+                    <div class="activity-selector">
+                        <button class="activity-btn active" data-type="running">
+                            <i class="fas fa-running"></i>
+                            <span>Running</span>
+                        </button>
+                        <button class="activity-btn" data-type="walking">
+                            <i class="fas fa-walking"></i>
+                            <span>Walking</span>
+                        </button>
+                    </div>
+
+                    <!-- Timer Display -->
+                    <div class="timer-display">
+                        <div class="time-value">
+                            <span id="hours">00</span>:<span id="minutes">00</span>:<span id="seconds">00</span>
+                        </div>
+                        <div class="timer-label">Duration</div>
+                    </div>
+
+                    <!-- Metrics -->
+                    <div class="metrics-grid">
+                        <div class="metric-card">
+                            <div class="metric-value" id="distance">0.00</div>
+                            <div class="metric-label">Distance (km)</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value" id="pace">0:00</div>
+                            <div class="metric-label">Pace (min/km)</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value" id="speed">0.0</div>
+                            <div class="metric-label">Speed (km/h)</div>
+                        </div>
+                    </div>
+
+                    <!-- GPS Status -->
+                    <div class="gps-status" id="gps-status">
+                        <i class="fas fa-satellite-dish"></i>
+                        <span>GPS: Searching...</span>
+                    </div>
+
+                    <!-- Control Buttons -->
+                    <div class="control-buttons">
+                        <button class="btn btn-primary" id="start-btn">
+                            <i class="fas fa-play"></i>
+                            Start
+                        </button>
+                        <button class="btn btn-secondary hidden" id="pause-btn">
+                            <i class="fas fa-pause"></i>
+                            Pause
+                        </button>
+                        <button class="btn btn-danger hidden" id="stop-btn">
+                            <i class="fas fa-stop"></i>
+                            Stop
+                        </button>
+                    </div>
+
+                    <!-- Manual Distance Input -->
+                    <div class="manual-input">
+                        <label for="manual-distance">Manual Distance (km):</label>
+                        <input type="number" id="manual-distance" step="0.01" min="0" placeholder="0.00">
+                        <button class="btn btn-outline" id="set-distance-btn">Set Distance</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- History Tab -->
+            <section id="history-tab" class="tab-content">
+                <div class="history-container">
+                    <div class="history-header">
+                        <h2>Activity History</h2>
+                        <button class="btn btn-outline" id="clear-history-btn">
+                            <i class="fas fa-trash"></i>
+                            Clear All
+                        </button>
+                    </div>
+                    <div class="history-list" id="history-list">
+                        <div class="empty-state">
+                            <i class="fas fa-clipboard-list"></i>
+                            <p>No activities recorded yet</p>
+                            <small>Start tracking to see your history</small>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Stats Tab -->
+            <section id="stats-tab" class="tab-content">
+                <div class="stats-container">
+                    <h2>Your Statistics</h2>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon running">
+                                <i class="fas fa-running"></i>
+                            </div>
+                            <div class="stat-info">
+                                <div class="stat-value" id="total-runs">0</div>
+                                <div class="stat-label">Total Runs</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon walking">
+                                <i class="fas fa-walking"></i>
+                            </div>
+                            <div class="stat-info">
+                                <div class="stat-value" id="total-walks">0</div>
+                                <div class="stat-label">Total Walks</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon distance">
+                                <i class="fas fa-route"></i>
+                            </div>
+                            <div class="stat-info">
+                                <div class="stat-value" id="total-distance">0.0 km</div>
+                                <div class="stat-label">Total Distance</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon time">
+                                <i class="fas fa-clock"></i>
+                            </div>
+                            <div class="stat-info">
+                                <div class="stat-value" id="total-time">0:00:00</div>
+                                <div class="stat-label">Total Time</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon pace">
+                                <i class="fas fa-tachometer-alt"></i>
+                            </div>
+                            <div class="stat-info">
+                                <div class="stat-value" id="avg-pace">0:00</div>
+                                <div class="stat-label">Average Pace</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon speed">
+                                <i class="fas fa-gauge-high"></i>
+                            </div>
+                            <div class="stat-info">
+                                <div class="stat-value" id="avg-speed">0.0 km/h</div>
+                                <div class="stat-label">Average Speed</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

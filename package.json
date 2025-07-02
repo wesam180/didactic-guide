@@ -1,0 +1,65 @@
+{
+  "name": "runtracker",
+  "version": "1.0.0",
+  "description": "A modern, feature-rich mobile application for tracking your running and walking activities. Built with Capacitor for native Android experience.",
+  "main": "script.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "echo \"Web app is already built - copying to www...\" && cp index.html styles.css script.js www/",
+    "dev": "python3 -m http.server 8000",
+    "android:sync": "npm run build && npx cap sync android",
+    "android:copy": "npx cap copy android",
+    "android:open": "npx cap open android",
+    "android:build": "npm run android:sync && npx cap build android",
+    "android:run": "npm run android:sync && npx cap run android",
+    "android:run-device": "npm run android:sync && npx cap run android --target device",
+    "android:clean": "cd android && ./gradlew clean && cd ..",
+    "setup": "npm install && npm run build && npx cap sync android"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wesam180/didactic-guide.git"
+  },
+  "keywords": [
+    "running",
+    "walking",
+    "fitness",
+    "tracker",
+    "android",
+    "mobile",
+    "gps",
+    "capacitor",
+    "health",
+    "sport",
+    "exercise"
+  ],
+  "author": "RunTracker Team",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/wesam180/didactic-guide/issues"
+  },
+  "homepage": "https://github.com/wesam180/didactic-guide#readme",
+  "dependencies": {
+    "@capacitor/android": "^5.6.0",
+    "@capacitor/cli": "^5.6.0",
+    "@capacitor/core": "^5.6.0",
+    "@capacitor/geolocation": "^7.1.2",
+    "@capacitor/app": "^7.0.1",
+    "@capacitor/status-bar": "^7.0.1",
+    "@capacitor/splash-screen": "^7.0.1",
+    "@capacitor/haptics": "^7.0.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "capacitor": {
+    "android": {
+      "minSdkVersion": 24,
+      "compileSdkVersion": 34,
+      "targetSdkVersion": 34
+    }
+  }
+}
