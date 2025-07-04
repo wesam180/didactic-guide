@@ -6,12 +6,16 @@ class RunTracker {
         this.isPaused = false;
         this.startTime = null;
         this.pausedTime = 0;
+        this.pauseStartTime = null;
         this.totalTime = 0;
         this.distance = 0;
         this.currentActivity = 'running';
         this.gpsWatchId = null;
         this.lastPosition = null;
         this.positions = [];
+        this.darkMode = false;
+        this.activityGoal = null;
+        this.goalType = 'distance'; // 'distance' or 'time'
         
         // Timer elements
         this.hoursEl = document.getElementById('hours');
@@ -60,6 +64,8 @@ class RunTracker {
         this.updateDisplay();
         this.updateStats();
         this.updateHistory();
+        this.setupDarkMode();
+        this.addNewFeatures();
     }
     
     setupEventListeners() {
@@ -71,7 +77,7 @@ class RunTracker {
         // Activity type selection
         this.activityBtns.forEach(btn => {
             btn.addEventListener('click', (e) => {
-                if (!this.isRunning) {
+                if (!this.isRunning && !this.isPaused) {
                     this.selectActivity(e.target.closest('.activity-btn').dataset.type);
                 }
             });
@@ -103,6 +109,7 @@ class RunTracker {
             navigator.geolocation.getCurrentPosition(
                 (position) => {
                     this.updateGPSStatus('GPS Ready', 'connected');
+                    this.displayGPSAccuracy(position.coords.accuracy);
                 },
                 (error) => {
                     this.handleGPSError(error);
@@ -117,6 +124,11 @@ class RunTracker {
     updateGPSStatus(message, status) {
         this.gpsStatusEl.querySelector('span').textContent = `GPS: ${message}`;
         this.gpsStatusEl.className = `gps-status ${status}`;
+    }
+    
+    displayGPSAccuracy(accuracy) {
+        const accuracyText = accuracy < 10 ? 'High' : accuracy < 50 ? 'Medium' : 'Low';
+        this.updateGPSStatus(`GPS Ready (${accuracyText} accuracy)`, 'connected');
     }
     
     handleGPSError(error) {
@@ -144,9 +156,10 @@ class RunTracker {
     
     start() {
         if (this.isPaused) {
-            // Resume from pause
-            this.pausedTime += Date.now() - this.startTime;
+            // Resume from pause - add the paused duration to total paused time
+            this.pausedTime += Date.now() - this.pauseStartTime;
             this.isPaused = false;
+            this.pauseStartTime = null;
         } else {
             // Fresh start
             this.startTime = Date.now();
@@ -165,6 +178,7 @@ class RunTracker {
     pause() {
         this.isPaused = true;
         this.isRunning = false;
+        this.pauseStartTime = Date.now();
         this.updateButtonStates();
         this.stopTimer();
         this.stopGPSTracking();
@@ -180,6 +194,7 @@ class RunTracker {
         this.totalTime = 0;
         this.distance = 0;
         this.positions = [];
+        this.pauseStartTime = null;
         this.updateButtonStates();
         this.stopTimer();
         this.stopGPSTracking();
@@ -211,7 +226,8 @@ class RunTracker {
     startTimer() {
         this.timerInterval = setInterval(() => {
             this.updateDisplay();
-        }, 100);
+            this.checkGoalProgress();
+        }, 1000); // Changed from 100ms to 1000ms for better performance
     }
     
     stopTimer() {
@@ -238,17 +254,19 @@ class RunTracker {
     }
     
     handleGPSPosition(position) {
-        this.updateGPSStatus('GPS Connected', 'connected');
+        this.updateGPSStatus(`GPS Connected (${position.coords.accuracy.toFixed(0)}m accuracy)`, 'connected');
         
         const newPos = {
             lat: position.coords.latitude,
             lng: position.coords.longitude,
-            timestamp: position.timestamp
+            timestamp: position.timestamp,
+            accuracy: position.coords.accuracy
         };
         
         if (this.lastPosition && this.isRunning) {
             const distanceDelta = this.calculateDistance(this.lastPosition, newPos);
-            if (distanceDelta > 0 && distanceDelta < 0.1) { // Filter out GPS noise
+            // Fixed GPS distance filtering - now filters out unrealistic distances
+            if (distanceDelta > 0 && distanceDelta < 0.5 && position.coords.accuracy < 100) {
                 this.distance += distanceDelta;
             }
         }
@@ -270,8 +288,15 @@ class RunTracker {
     
     getCurrentTime() {
         if (!this.isRunning && !this.isPaused) return 0;
-        const now = this.isPaused ? this.startTime : Date.now();
-        return Math.floor((now - this.startTime - this.pausedTime) / 1000);
+        const now = Date.now();
+        let totalElapsed = now - this.startTime - this.pausedTime;
+        
+        // If currently paused, don't count the current pause period
+        if (this.isPaused && this.pauseStartTime) {
+            totalElapsed -= (now - this.pauseStartTime);
+        }
+        
+        return Math.floor(totalElapsed / 1000);
     }
     
     updateDisplay() {
@@ -309,6 +334,32 @@ class RunTracker {
         }
     }
     
+    checkGoalProgress() {
+        if (!this.activityGoal) return;
+        
+        const currentValue = this.goalType === 'distance' ? this.distance : this.getCurrentTime() / 60;
+        const progress = (currentValue / this.activityGoal) * 100;
+        
+        if (progress >= 25 && progress < 50) {
+            this.announceProgress('25% of goal completed!');
+        } else if (progress >= 50 && progress < 75) {
+            this.announceProgress('50% of goal completed!');
+        } else if (progress >= 75 && progress < 100) {
+            this.announceProgress('75% of goal completed!');
+        } else if (progress >= 100) {
+            this.announceProgress('Goal achieved! Great job!');
+        }
+    }
+    
+    announceProgress(message) {
+        if ('speechSynthesis' in window) {
+            const utterance = new SpeechSynthesisUtterance(message);
+            utterance.rate = 0.8;
+            utterance.pitch = 1;
+            speechSynthesis.speak(utterance);
+        }
+    }
+    
     saveActivity() {
         const activity = {
             id: Date.now(),
@@ -316,7 +367,9 @@ class RunTracker {
             date: new Date().toISOString(),
             duration: this.getCurrentTime(),
             distance: this.distance,
-            positions: this.positions
+            positions: this.positions,
+            avgAccuracy: this.positions.length > 0 ? 
+                this.positions.reduce((sum, pos) => sum + (pos.accuracy || 0), 0) / this.positions.length : 0
         };
         
         const activities = this.getActivities();
@@ -328,8 +381,13 @@ class RunTracker {
     }
     
     getActivities() {
-        const stored = localStorage.getItem('runtracker_activities');
-        return stored ? JSON.parse(stored) : [];
+        try {
+            const stored = localStorage.getItem('runtracker_activities');
+            return stored ? JSON.parse(stored) : [];
+        } catch (error) {
+            console.error('Error loading activities:', error);
+            return [];
+        }
     }
     
     updateHistory() {
@@ -366,10 +424,31 @@ class RunTracker {
                     <div class="history-item-stats">
                         <div class="stat">Pace: ${pace}/km</div>
                         <div class="date">${date.toLocaleDateString()}</div>
+                        <button class="btn btn-sm btn-danger delete-activity" data-id="${activity.id}">
+                            <i class="fas fa-trash"></i>
+                        </button>
                     </div>
                 </div>
             `;
         }).join('');
+        
+        // Add delete functionality
+        this.historyList.querySelectorAll('.delete-activity').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.deleteActivity(parseInt(btn.dataset.id));
+            });
+        });
+    }
+    
+    deleteActivity(id) {
+        if (confirm('Are you sure you want to delete this activity?')) {
+            const activities = this.getActivities();
+            const filtered = activities.filter(activity => activity.id !== id);
+            localStorage.setItem('runtracker_activities', JSON.stringify(filtered));
+            this.updateHistory();
+            this.updateStats();
+        }
     }
     
     updateStats() {
@@ -441,12 +520,129 @@ class RunTracker {
         }
     }
     
+    exportData() {
+        const activities = this.getActivities();
+        const dataStr = JSON.stringify(activities, null, 2);
+        const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+        
+        const exportFileDefaultName = `runtracker_export_${new Date().toISOString().split('T')[0]}.json`;
+        
+        const linkElement = document.createElement('a');
+        linkElement.setAttribute('href', dataUri);
+        linkElement.setAttribute('download', exportFileDefaultName);
+        linkElement.click();
+    }
+    
+    exportToCSV() {
+        const activities = this.getActivities();
+        const csvHeader = 'Date,Type,Duration (seconds),Distance (km),Pace (min/km),Speed (km/h)\n';
+        const csvRows = activities.map(activity => {
+            const date = new Date(activity.date).toLocaleDateString();
+            const pace = activity.distance > 0 ? activity.duration / activity.distance / 60 : 0;
+            const speed = activity.distance > 0 ? activity.distance / (activity.duration / 3600) : 0;
+            return `${date},${activity.type},${activity.duration},${activity.distance},${pace.toFixed(2)},${speed.toFixed(2)}`;
+        }).join('\n');
+        
+        const csvContent = csvHeader + csvRows;
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', `runtracker_export_${new Date().toISOString().split('T')[0]}.csv`);
+        link.click();
+    }
+    
+    setupDarkMode() {
+        const savedTheme = localStorage.getItem('runtracker_theme');
+        if (savedTheme === 'dark') {
+            this.toggleDarkMode();
+        }
+    }
+    
+    toggleDarkMode() {
+        this.darkMode = !this.darkMode;
+        document.body.classList.toggle('dark-mode', this.darkMode);
+        localStorage.setItem('runtracker_theme', this.darkMode ? 'dark' : 'light');
+    }
+    
+    setGoal(value, type) {
+        this.activityGoal = value;
+        this.goalType = type;
+        localStorage.setItem('runtracker_goal', JSON.stringify({ value, type }));
+    }
+    
+    loadGoal() {
+        const savedGoal = localStorage.getItem('runtracker_goal');
+        if (savedGoal) {
+            const goal = JSON.parse(savedGoal);
+            this.activityGoal = goal.value;
+            this.goalType = goal.type;
+        }
+    }
+    
+    addNewFeatures() {
+        // Add export buttons to stats tab
+        const statsContainer = document.querySelector('.stats-container');
+        const exportSection = document.createElement('div');
+        exportSection.className = 'export-section';
+        exportSection.innerHTML = `
+            <h3>Export Data</h3>
+            <div class="export-buttons">
+                <button class="btn btn-outline" id="export-json">
+                    <i class="fas fa-download"></i> Export JSON
+                </button>
+                <button class="btn btn-outline" id="export-csv">
+                    <i class="fas fa-file-csv"></i> Export CSV
+                </button>
+            </div>
+        `;
+        statsContainer.appendChild(exportSection);
+        
+        // Add dark mode toggle to header
+        const headerContent = document.querySelector('.header-content');
+        const darkModeToggle = document.createElement('button');
+        darkModeToggle.className = 'btn btn-outline dark-mode-toggle';
+        darkModeToggle.innerHTML = '<i class="fas fa-moon"></i>';
+        darkModeToggle.addEventListener('click', () => this.toggleDarkMode());
+        headerContent.appendChild(darkModeToggle);
+        
+        // Add goal setting to tracker
+        const trackerContainer = document.querySelector('.tracker-container');
+        const goalSection = document.createElement('div');
+        goalSection.className = 'goal-section';
+        goalSection.innerHTML = `
+            <div class="goal-input">
+                <label>Activity Goal:</label>
+                <input type="number" id="goal-value" step="0.1" min="0" placeholder="Set goal">
+                <select id="goal-type">
+                    <option value="distance">km</option>
+                    <option value="time">minutes</option>
+                </select>
+                <button class="btn btn-outline" id="set-goal">Set Goal</button>
+            </div>
+        `;
+        trackerContainer.appendChild(goalSection);
+        
+        // Add event listeners
+        document.getElementById('export-json').addEventListener('click', () => this.exportData());
+        document.getElementById('export-csv').addEventListener('click', () => this.exportToCSV());
+        document.getElementById('set-goal').addEventListener('click', () => {
+            const value = parseFloat(document.getElementById('goal-value').value);
+            const type = document.getElementById('goal-type').value;
+            if (value > 0) {
+                this.setGoal(value, type);
+                alert(`Goal set: ${value} ${type === 'distance' ? 'km' : 'minutes'}`);
+            }
+        });
+    }
+    
     loadData() {
         // Load any saved preferences or state
         const savedActivity = localStorage.getItem('runtracker_activity_type');
         if (savedActivity) {
             this.selectActivity(savedActivity);
         }
+        this.loadGoal();
     }
     
     saveData() {
@@ -476,16 +672,3 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 });
-
-// Service Worker registration for offline functionality (optional)
-if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js')
-            .then((registration) => {
-                console.log('SW registered: ', registration);
-            })
-            .catch((registrationError) => {
-                console.log('SW registration failed: ', registrationError);
-            });
-    });
-}
