@@ -6,6 +6,7 @@
     --success-color: #10b981;
     --danger-color: #ef4444;
     --warning-color: #f59e0b;
+    --info-color: #3b82f6;
     --gray-50: #f9fafb;
     --gray-100: #f3f4f6;
     --gray-200: #e5e7eb;
@@ -71,6 +72,80 @@ body {
     min-height: 100vh;
     background: var(--white);
     box-shadow: var(--shadow-xl);
+}
+
+/* Notification System */
+.notification {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    padding: 1rem 1.5rem;
+    border-radius: var(--border-radius);
+    color: var(--white);
+    font-weight: 500;
+    box-shadow: var(--shadow-lg);
+    z-index: 1000;
+    transform: translateX(400px);
+    opacity: 0;
+    transition: all 0.3s ease;
+    max-width: 300px;
+}
+
+.notification.show {
+    transform: translateX(0);
+    opacity: 1;
+}
+
+.notification.info {
+    background: var(--info-color);
+}
+
+.notification.success {
+    background: var(--success-color);
+}
+
+.notification.warning {
+    background: var(--warning-color);
+}
+
+.notification.error {
+    background: var(--danger-color);
+}
+
+/* Connection Status */
+.connection-status {
+    display: flex;
+    align-items: center;
+}
+
+.status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    border-radius: calc(var(--border-radius) - 4px);
+    font-size: 0.875rem;
+    font-weight: 500;
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--white);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    transition: var(--transition);
+}
+
+.status-indicator.online {
+    background: rgba(16, 185, 129, 0.2);
+    border-color: var(--success-color);
+    color: var(--white);
+}
+
+.status-indicator.offline {
+    background: rgba(239, 68, 68, 0.2);
+    border-color: var(--danger-color);
+    color: var(--white);
+}
+
+.status-indicator i {
+    font-size: 0.875rem;
 }
 
 /* Header Styles */
@@ -791,6 +866,17 @@ body {
     .nav-tab {
         max-width: none;
     }
+
+    .notification {
+        right: 10px;
+        left: 10px;
+        max-width: none;
+    }
+
+    .connection-status {
+        order: -1;
+        margin-bottom: 0.5rem;
+    }
 }
 
 @media (max-width: 480px) {
@@ -808,5 +894,14 @@ body {
 
     .time-value {
         font-size: 2rem;
+    }
+
+    .notification {
+        top: 10px;
+        transform: translateY(-100px);
+    }
+
+    .notification.show {
+        transform: translateY(0);
     }
 }

@@ -1,4 +1,4 @@
-// RunTracker App - Main JavaScript File
+// RunTracker App - Main JavaScript File with Database Integration
 
 class RunTracker {
     constructor() {
@@ -15,7 +15,10 @@ class RunTracker {
         this.positions = [];
         this.darkMode = false;
         this.activityGoal = null;
-        this.goalType = 'distance'; // 'distance' or 'time'
+        this.goalType = 'distance';
+        this.apiBaseUrl = '/api';
+        this.isOnline = navigator.onLine;
+        this.pendingOperations = [];
         
         // Timer elements
         this.hoursEl = document.getElementById('hours');
@@ -57,15 +60,133 @@ class RunTracker {
         this.init();
     }
     
-    init() {
+    async init() {
         this.setupEventListeners();
         this.setupGPS();
-        this.loadData();
+        this.setupOnlineOfflineHandlers();
+        await this.checkAndMigrateData();
+        await this.loadData();
         this.updateDisplay();
-        this.updateStats();
-        this.updateHistory();
+        await this.updateStats();
+        await this.updateHistory();
         this.setupDarkMode();
         this.addNewFeatures();
+    }
+    
+    setupOnlineOfflineHandlers() {
+        window.addEventListener('online', () => {
+            this.isOnline = true;
+            this.syncPendingOperations();
+            this.showNotification('Back online! Syncing data...', 'success');
+        });
+        
+        window.addEventListener('offline', () => {
+            this.isOnline = false;
+            this.showNotification('Offline mode - data will sync when back online', 'warning');
+        });
+    }
+    
+    showNotification(message, type = 'info') {
+        // Create notification element if it doesn't exist
+        let notification = document.getElementById('notification');
+        if (!notification) {
+            notification = document.createElement('div');
+            notification.id = 'notification';
+            notification.className = 'notification';
+            document.body.appendChild(notification);
+        }
+        
+        notification.textContent = message;
+        notification.className = `notification ${type} show`;
+        
+        setTimeout(() => {
+            notification.classList.remove('show');
+        }, 3000);
+    }
+    
+    async checkAndMigrateData() {
+        try {
+            // Check if there's localStorage data to migrate
+            const localStorageActivities = localStorage.getItem('runtracker_activities');
+            if (localStorageActivities && this.isOnline) {
+                const activities = JSON.parse(localStorageActivities);
+                if (activities.length > 0) {
+                    await this.migrateLocalStorageData(activities);
+                    // Keep localStorage as backup for now
+                    localStorage.setItem('runtracker_activities_migrated', 'true');
+                }
+            }
+        } catch (error) {
+            console.error('Migration error:', error);
+        }
+    }
+    
+    async migrateLocalStorageData(activities) {
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/migrate`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ activities })
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                this.showNotification(`Migrated ${result.migratedCount} activities to database`, 'success');
+            }
+        } catch (error) {
+            console.error('Failed to migrate data:', error);
+        }
+    }
+    
+    async apiRequest(endpoint, options = {}) {
+        const url = `${this.apiBaseUrl}${endpoint}`;
+        const defaultOptions = {
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        };
+        
+        try {
+            const response = await fetch(url, { ...defaultOptions, ...options });
+            
+            if (!response.ok) {
+                throw new Error(`API request failed: ${response.status}`);
+            }
+            
+            return await response.json();
+        } catch (error) {
+            console.error('API request failed:', error);
+            
+            // If offline, queue the operation
+            if (!this.isOnline && options.method !== 'GET') {
+                this.pendingOperations.push({ endpoint, options });
+                this.showNotification('Operation queued for when back online', 'info');
+            }
+            
+            throw error;
+        }
+    }
+    
+    async syncPendingOperations() {
+        while (this.pendingOperations.length > 0) {
+            const operation = this.pendingOperations.shift();
+            try {
+                await this.apiRequest(operation.endpoint, operation.options);
+            } catch (error) {
+                console.error('Failed to sync operation:', error);
+                // Re-queue if it fails
+                this.pendingOperations.unshift(operation);
+                break;
+            }
+        }
+        
+        if (this.pendingOperations.length === 0) {
+            this.showNotification('All data synced successfully!', 'success');
+            await this.updateHistory();
+            await this.updateStats();
+        }
     }
     
     setupEventListeners() {
@@ -184,9 +305,9 @@ class RunTracker {
         this.stopGPSTracking();
     }
     
-    stop() {
+    async stop() {
         if (this.isRunning || this.isPaused) {
-            this.saveActivity();
+            await this.saveActivity();
         }
         
         this.isRunning = false;
@@ -360,9 +481,8 @@ class RunTracker {
         }
     }
     
-    saveActivity() {
+    async saveActivity() {
         const activity = {
-            id: Date.now(),
             type: this.currentActivity,
             date: new Date().toISOString(),
             duration: this.getCurrentTime(),
@@ -372,26 +492,64 @@ class RunTracker {
                 this.positions.reduce((sum, pos) => sum + (pos.accuracy || 0), 0) / this.positions.length : 0
         };
         
-        const activities = this.getActivities();
-        activities.unshift(activity);
-        localStorage.setItem('runtracker_activities', JSON.stringify(activities));
-        
-        this.updateHistory();
-        this.updateStats();
+        try {
+            if (this.isOnline) {
+                await this.apiRequest('/activities', {
+                    method: 'POST',
+                    body: JSON.stringify(activity)
+                });
+                this.showNotification('Activity saved successfully!', 'success');
+            } else {
+                // Save to localStorage as backup when offline
+                this.saveActivityOffline(activity);
+                this.showNotification('Activity saved offline', 'info');
+            }
+            
+            await this.updateHistory();
+            await this.updateStats();
+        } catch (error) {
+            console.error('Failed to save activity:', error);
+            // Fallback to localStorage
+            this.saveActivityOffline(activity);
+            this.showNotification('Activity saved locally', 'warning');
+        }
     }
     
-    getActivities() {
+    saveActivityOffline(activity) {
+        const activities = this.getLocalStorageActivities();
+        activity.id = Date.now(); // Add local ID
+        activities.unshift(activity);
+        localStorage.setItem('runtracker_activities_offline', JSON.stringify(activities));
+    }
+    
+    getLocalStorageActivities() {
         try {
-            const stored = localStorage.getItem('runtracker_activities');
+            const stored = localStorage.getItem('runtracker_activities_offline');
             return stored ? JSON.parse(stored) : [];
         } catch (error) {
-            console.error('Error loading activities:', error);
+            console.error('Error loading offline activities:', error);
             return [];
         }
     }
     
-    updateHistory() {
-        const activities = this.getActivities();
+    async getActivities() {
+        try {
+            if (this.isOnline) {
+                const response = await this.apiRequest('/activities');
+                return response.activities || [];
+            } else {
+                // Return offline activities when not connected
+                return this.getLocalStorageActivities();
+            }
+        } catch (error) {
+            console.error('Error loading activities:', error);
+            // Fallback to localStorage
+            return this.getLocalStorageActivities();
+        }
+    }
+    
+    async updateHistory() {
+        const activities = await this.getActivities();
         
         if (activities.length === 0) {
             this.historyList.innerHTML = `
@@ -441,40 +599,90 @@ class RunTracker {
         });
     }
     
-    deleteActivity(id) {
+    async deleteActivity(id) {
         if (confirm('Are you sure you want to delete this activity?')) {
-            const activities = this.getActivities();
-            const filtered = activities.filter(activity => activity.id !== id);
-            localStorage.setItem('runtracker_activities', JSON.stringify(filtered));
-            this.updateHistory();
-            this.updateStats();
+            try {
+                if (this.isOnline) {
+                    await this.apiRequest(`/activities/${id}`, {
+                        method: 'DELETE'
+                    });
+                    this.showNotification('Activity deleted successfully!', 'success');
+                } else {
+                    // Delete from localStorage when offline
+                    const activities = this.getLocalStorageActivities();
+                    const filtered = activities.filter(activity => activity.id !== id);
+                    localStorage.setItem('runtracker_activities_offline', JSON.stringify(filtered));
+                    this.showNotification('Activity deleted offline', 'info');
+                }
+                
+                await this.updateHistory();
+                await this.updateStats();
+            } catch (error) {
+                console.error('Failed to delete activity:', error);
+                this.showNotification('Failed to delete activity', 'error');
+            }
         }
     }
     
-    updateStats() {
-        const activities = this.getActivities();
-        
-        const runs = activities.filter(a => a.type === 'running');
-        const walks = activities.filter(a => a.type === 'walking');
-        
-        const totalDistance = activities.reduce((sum, a) => sum + a.distance, 0);
-        const totalTime = activities.reduce((sum, a) => sum + a.duration, 0);
-        
-        this.totalRunsEl.textContent = runs.length;
-        this.totalWalksEl.textContent = walks.length;
-        this.totalDistanceEl.textContent = `${totalDistance.toFixed(1)} km`;
-        this.totalTimeEl.textContent = this.formatDuration(totalTime);
-        
-        if (activities.length > 0 && totalDistance > 0) {
-            const avgPace = totalTime / totalDistance;
-            this.avgPaceEl.textContent = this.formatPace(avgPace) + '/km';
+    async updateStats() {
+        try {
+            let stats;
             
-            const avgSpeed = totalDistance / (totalTime / 3600);
-            this.avgSpeedEl.textContent = `${avgSpeed.toFixed(1)} km/h`;
-        } else {
+            if (this.isOnline) {
+                stats = await this.apiRequest('/stats');
+                stats = stats.overview;
+            } else {
+                // Calculate stats from offline data
+                const activities = this.getLocalStorageActivities();
+                stats = this.calculateOfflineStats(activities);
+            }
+            
+            this.totalRunsEl.textContent = stats.total_runs || 0;
+            this.totalWalksEl.textContent = stats.total_walks || 0;
+            this.totalDistanceEl.textContent = `${(stats.total_distance || 0).toFixed(1)} km`;
+            this.totalTimeEl.textContent = this.formatDuration(stats.total_time || 0);
+            
+            if (stats.avg_pace && stats.avg_speed) {
+                this.avgPaceEl.textContent = this.formatPace(stats.avg_pace) + '/km';
+                this.avgSpeedEl.textContent = `${stats.avg_speed.toFixed(1)} km/h`;
+            } else {
+                this.avgPaceEl.textContent = '0:00/km';
+                this.avgSpeedEl.textContent = '0.0 km/h';
+            }
+        } catch (error) {
+            console.error('Failed to load stats:', error);
+            // Set default values
+            this.totalRunsEl.textContent = '0';
+            this.totalWalksEl.textContent = '0';
+            this.totalDistanceEl.textContent = '0.0 km';
+            this.totalTimeEl.textContent = '0:00';
             this.avgPaceEl.textContent = '0:00/km';
             this.avgSpeedEl.textContent = '0.0 km/h';
         }
+    }
+    
+    calculateOfflineStats(activities) {
+        const runs = activities.filter(a => a.type === 'running');
+        const walks = activities.filter(a => a.type === 'walking');
+        const totalDistance = activities.reduce((sum, a) => sum + a.distance, 0);
+        const totalTime = activities.reduce((sum, a) => sum + a.duration, 0);
+        
+        let avgPace = 0;
+        let avgSpeed = 0;
+        
+        if (totalDistance > 0 && totalTime > 0) {
+            avgPace = totalTime / totalDistance;
+            avgSpeed = totalDistance / (totalTime / 3600);
+        }
+        
+        return {
+            total_runs: runs.length,
+            total_walks: walks.length,
+            total_distance: totalDistance,
+            total_time: totalTime,
+            avg_pace: avgPace,
+            avg_speed: avgSpeed
+        };
     }
     
     formatDuration(seconds) {
@@ -512,44 +720,78 @@ class RunTracker {
         }
     }
     
-    clearHistory() {
+    async clearHistory() {
         if (confirm('Are you sure you want to clear all activity history? This cannot be undone.')) {
-            localStorage.removeItem('runtracker_activities');
-            this.updateHistory();
-            this.updateStats();
+            try {
+                if (this.isOnline) {
+                    // Note: This would need a bulk delete API endpoint
+                    this.showNotification('Bulk delete not implemented yet via API', 'warning');
+                } else {
+                    localStorage.removeItem('runtracker_activities_offline');
+                    this.showNotification('Offline history cleared', 'info');
+                }
+                
+                await this.updateHistory();
+                await this.updateStats();
+            } catch (error) {
+                console.error('Failed to clear history:', error);
+                this.showNotification('Failed to clear history', 'error');
+            }
         }
     }
     
-    exportData() {
-        const activities = this.getActivities();
-        const dataStr = JSON.stringify(activities, null, 2);
-        const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-        
-        const exportFileDefaultName = `runtracker_export_${new Date().toISOString().split('T')[0]}.json`;
-        
-        const linkElement = document.createElement('a');
-        linkElement.setAttribute('href', dataUri);
-        linkElement.setAttribute('download', exportFileDefaultName);
-        linkElement.click();
+    async exportData() {
+        try {
+            if (this.isOnline) {
+                // Use API export
+                window.open(`${this.apiBaseUrl}/activities/export/json`, '_blank');
+            } else {
+                // Export offline data
+                const activities = this.getLocalStorageActivities();
+                const dataStr = JSON.stringify(activities, null, 2);
+                const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+                
+                const exportFileDefaultName = `runtracker_export_offline_${new Date().toISOString().split('T')[0]}.json`;
+                
+                const linkElement = document.createElement('a');
+                linkElement.setAttribute('href', dataUri);
+                linkElement.setAttribute('download', exportFileDefaultName);
+                linkElement.click();
+            }
+        } catch (error) {
+            console.error('Export failed:', error);
+            this.showNotification('Export failed', 'error');
+        }
     }
     
-    exportToCSV() {
-        const activities = this.getActivities();
-        const csvHeader = 'Date,Type,Duration (seconds),Distance (km),Pace (min/km),Speed (km/h)\n';
-        const csvRows = activities.map(activity => {
-            const date = new Date(activity.date).toLocaleDateString();
-            const pace = activity.distance > 0 ? activity.duration / activity.distance / 60 : 0;
-            const speed = activity.distance > 0 ? activity.distance / (activity.duration / 3600) : 0;
-            return `${date},${activity.type},${activity.duration},${activity.distance},${pace.toFixed(2)},${speed.toFixed(2)}`;
-        }).join('\n');
-        
-        const csvContent = csvHeader + csvRows;
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement('a');
-        const url = URL.createObjectURL(blob);
-        link.setAttribute('href', url);
-        link.setAttribute('download', `runtracker_export_${new Date().toISOString().split('T')[0]}.csv`);
-        link.click();
+    async exportToCSV() {
+        try {
+            if (this.isOnline) {
+                // Use API export
+                window.open(`${this.apiBaseUrl}/activities/export/csv`, '_blank');
+            } else {
+                // Export offline data as CSV
+                const activities = this.getLocalStorageActivities();
+                const csvHeader = 'Date,Type,Duration (seconds),Distance (km),Pace (min/km),Speed (km/h)\n';
+                const csvRows = activities.map(activity => {
+                    const date = new Date(activity.date).toLocaleDateString();
+                    const pace = activity.distance > 0 ? activity.duration / activity.distance / 60 : 0;
+                    const speed = activity.distance > 0 ? activity.distance / (activity.duration / 3600) : 0;
+                    return `${date},${activity.type},${activity.duration},${activity.distance},${pace.toFixed(2)},${speed.toFixed(2)}`;
+                }).join('\n');
+                
+                const csvContent = csvHeader + csvRows;
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a');
+                const url = URL.createObjectURL(blob);
+                link.setAttribute('href', url);
+                link.setAttribute('download', `runtracker_export_offline_${new Date().toISOString().split('T')[0]}.csv`);
+                link.click();
+            }
+        } catch (error) {
+            console.error('CSV export failed:', error);
+            this.showNotification('CSV export failed', 'error');
+        }
     }
     
     setupDarkMode() {
@@ -565,13 +807,45 @@ class RunTracker {
         localStorage.setItem('runtracker_theme', this.darkMode ? 'dark' : 'light');
     }
     
-    setGoal(value, type) {
+    async setGoal(value, type) {
         this.activityGoal = value;
         this.goalType = type;
-        localStorage.setItem('runtracker_goal', JSON.stringify({ value, type }));
+        
+        try {
+            if (this.isOnline) {
+                await this.apiRequest('/stats/goals', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        goal_type: type,
+                        goal_value: value,
+                        activity_type: 'both'
+                    })
+                });
+            } else {
+                localStorage.setItem('runtracker_goal', JSON.stringify({ value, type }));
+            }
+        } catch (error) {
+            console.error('Failed to save goal:', error);
+            localStorage.setItem('runtracker_goal', JSON.stringify({ value, type }));
+        }
     }
     
-    loadGoal() {
+    async loadGoal() {
+        try {
+            if (this.isOnline) {
+                const goals = await this.apiRequest('/stats/goals');
+                if (goals.length > 0) {
+                    const activeGoal = goals.find(g => g.is_active) || goals[0];
+                    this.activityGoal = activeGoal.goal_value;
+                    this.goalType = activeGoal.goal_type;
+                    return;
+                }
+            }
+        } catch (error) {
+            console.error('Failed to load goals from API:', error);
+        }
+        
+        // Fallback to localStorage
         const savedGoal = localStorage.getItem('runtracker_goal');
         if (savedGoal) {
             const goal = JSON.parse(savedGoal);
@@ -597,6 +871,17 @@ class RunTracker {
             </div>
         `;
         statsContainer.appendChild(exportSection);
+        
+        // Add connection status indicator
+        const statusIndicator = document.createElement('div');
+        statusIndicator.className = 'connection-status';
+        statusIndicator.innerHTML = `
+            <div class="status-indicator ${this.isOnline ? 'online' : 'offline'}">
+                <i class="fas fa-${this.isOnline ? 'wifi' : 'wifi-slash'}"></i>
+                <span>${this.isOnline ? 'Online' : 'Offline'}</span>
+            </div>
+        `;
+        document.querySelector('.header-content').appendChild(statusIndicator);
         
         // Add dark mode toggle to header
         const headerContent = document.querySelector('.header-content');
@@ -634,15 +919,28 @@ class RunTracker {
                 alert(`Goal set: ${value} ${type === 'distance' ? 'km' : 'minutes'}`);
             }
         });
+        
+        // Update connection status
+        window.addEventListener('online', () => {
+            const indicator = document.querySelector('.status-indicator');
+            indicator.className = 'status-indicator online';
+            indicator.innerHTML = '<i class="fas fa-wifi"></i><span>Online</span>';
+        });
+        
+        window.addEventListener('offline', () => {
+            const indicator = document.querySelector('.status-indicator');
+            indicator.className = 'status-indicator offline';
+            indicator.innerHTML = '<i class="fas fa-wifi-slash"></i><span>Offline</span>';
+        });
     }
     
-    loadData() {
+    async loadData() {
         // Load any saved preferences or state
         const savedActivity = localStorage.getItem('runtracker_activity_type');
         if (savedActivity) {
             this.selectActivity(savedActivity);
         }
-        this.loadGoal();
+        await this.loadGoal();
     }
     
     saveData() {
@@ -672,3 +970,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 });
+
+// Remove service worker registration since the file doesn't exist
+// This prevents console errors about missing sw.js file
